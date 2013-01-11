@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tiler</title>
+    <!link type="text/css" rel="stylesheet" media="all" href="http://code.jquery.com/ui/1.9.2/themes/base/jquery-ui.css"/>
+    <link href="http://netdna.bootstrapcdn.com/twitter-bootstrap/2.2.2/css/bootstrap-combined.min.css" rel="stylesheet">
+    <style>
+        #divPreview {  }
+        #divPreview > img { float: left; }
+        #divPreview > div > span { display: block; }
+        #divPreview > div > input { width: 25px; }
+        #tbl { clear: both; border-collapse: collapse; }
+        #tbl tr td { height: 32px; width: 32px; padding: 0; margin: 0; line-height: 0; }
+        #tbl tr td:hover { background-color: rgba(173, 216, 230, 0.5); }
+    </style>
+</head>
+<body>
+    <div id="toolbar" class="btn-group">
+        <button id="btnLoadImage" data-state="add" class="btn"><i class="icon-plus" data-bind="css: { active: unused().length > 0 }"></i></button>
+        <button class="btn" data-state="delete"><i class="icon-remove"></i></button>
+        <!--<button class="btn">Select</button>-->
+        <button class="btn" data-state="move"><i class="icon-move"></i></button>
+        <button class="btn" data-state="compare"><i class="icon-check"></i></button>
+    </div>
+
+    <div id="divSections">
+        <div id="divAdd" class="well" data-bind="allowBindings: false, visible: $data === 'add'">
+            <button class="close" onclick="Tiler.images.unused.splice(0, Tiler.images.unused().length); return false;">&times;</button>
+            <input id="files" type="file" multiple style="display:none;"/>
+
+            Select an Image:
+            <ul id="lstImages" class="inline" data-bind="foreach:images.unused">
+                <li><img data-bind="attr: { src: src, 'data-index': $index }" height="50px" width="50px"/></li>
+            </ul>
+
+            <div id="divPreview" class="row" data-bind="if: $data != null">
+                <div class="span2">
+                    <span data-bind="text: name"></span>
+                    <span data-bind="text: width + 'px x ' + height + 'px' "></span>
+                    <span data-bind="text: widthInTiles() + ' x ' + heightInTiles() + ' tiles'"></span>
+                </div>
+                <div class="span1 form-inline">
+                    <span>Add at:</span>
+                    <input id="txtX" type="text" maxlength="2"/> <label for="txtX">x</label>
+                    <input id="txtY" type="text" maxlength="2"/> <label for="txtY">y</label>
+                    <button id="btnAddToGrid" onclick="addImage(); return false;">Add</button>
+                </div>
+                <div id="divPreviewImg" class="span5">
+                    <img data-bind="attr: {src: src}"/>
+                </div>
+            </div>
+        </div>
+
+        <div id="divRemove" class="well" data-bind="visible: $data === 'delete'">
+            <button class="close" onclick="">&times;</button>
+            Select the images to delete:
+            <ul id="lstToDelete" data-bind="foreach: $context" class='inline'>
+                <li>hello<img data-bin="attr: { src: $('#' + $data + ' > img').attr('src') }"/></li>
+            </ul>
+        </div>
+    </div>
+    <table id="tbl">
+
+    </table>
+
+    <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.8.3/jquery.min.js"></script>
+    <!--script src="http://ajax.googleapis.com/ajax/libs/jqueryui/1.9.2/jquery-ui.min.js"></script-->
+    <script src="http://ajax.aspnetcdn.com/ajax/knockout/knockout-2.2.0.js"></script>
+    <script src="http://netdna.bootstrapcdn.com/twitter-bootstrap/2.2.2/js/bootstrap.min.js"></script>
+    <script src="Tiler.js"></script>
+
+    <script>
+        "use strict";
+
+        var state = {
+            selectedIndex: ko.observable(null),
+            selectedImage: null,
+            state: ko.observable(null)
+        };
+        state.selectedImage = ko.computed(function() {
+                if(this.selectedIndex() == null)
+                    return null;
+                return Tiler.images.unused()[this.selectedIndex()];
+            }, state);
+
+        $(function() {
+           var files = $("#files").change(Tiler.filesSelected);
+            var lst = $("#lstImages").click(unusedImageClicked);
+            $("#btnLoadImage").click(function() { state.state("add"); files.click(); });
+            $("#toolbar").click(function(e) {
+                var btn = $(e.target);
+                var st = btn.data("state");
+                state.state(st);
+            });
+
+            var tbl = $("#tbl");
+            var rows = [];
+            var curr = [];
+            var x = 0, y=0;
+            for(x=1; x<=32; ++x)
+                curr.push(x);
+            rows.push("<tr><td></td><td>" + curr.join("</td><td>") + "</td></tr>");
+
+            for(y=1; y<=32; ++y) {
+                curr = ["<td>" + y + "</td>"];
+                for(x=1; x<=32; ++x) {
+                    curr.push("<td id='" + x + "_" + y + "' data-x='" + x + "' data-y='" + y + "'></td>");
+                }
+                rows.push("<tr>" + curr.join("") + "</tr>");
+            }
+            tbl.append(rows.join("")).click(cellClick);
+
+            ko.applyBindings(Tiler, lst[0]);
+            ko.applyBindings(state.state, $("#divSections")[0]);
+            ko.applyBindings(state.selectedImage, $("#divPreview")[0]);
+            ko.applyBindings(Tiler.images.toDelete, $("#lstToDelete")[0]);
+        });
+
+        function unusedImageClicked(e) {
+            var img = $(e.target);
+            var data = img.data("index");
+            state.selectedIndex(data);
+        }
+
+        function addImage() {
+            var idx = state.selectedIndex();
+            var data = state.selectedImage();
+            var parts = data.split().reverse();
+
+            var xStart = parseInt($("#txtX").val());
+            var yStart = parseInt($("#txtY").val());
+            var w = xStart + data.widthInTiles();
+            var h = yStart + data.heightInTiles();
+
+            for(var y=yStart; y < h; ++y) {
+                for(var x=xStart; x < w; ++x) {
+                    $("#" + x + "_" + y).children().remove().end().append(parts.pop());
+                }
+            }
+
+            Tiler.images.unused.splice(idx, 1);
+            Tiler.images.used.push(data);
+            state.selectedIndex(null);
+        }
+
+        function cellClick(e) {
+            var target = $(e.target).closest("td");
+            switch(state.state()) {
+                case 'add':
+                    if(target.children("img").length > 0) {
+                        target.addClass("selected");
+                    } else {
+                        $("#txtX").val(target.data("x"));
+                        $("#txtY").val(target.data("y"));
+                    }
+                    break;
+
+                case 'delete':
+                    Tiler.images.toDelete.push(target.attr("id"));
+                    break;
+            }
+        }
+    </script>
+</body>
+</html>
