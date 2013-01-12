@@ -67,14 +67,50 @@ var Tiler = (function($, ko) {
         return ret;
     }
 
+    /** @enum */
+    var STATE = { None: 'None', Add: 'Add', Delete: 'Delete', Move: 'Move', Compare: 'Compare', Save: 'Save' };
+
     var ret = {
         filesSelected: fileSelector_OnChange,
         images: {
             used: usedImages,
             unused: unusedImages,
             toDelete: ko.observableArray()
-        }
+        },
+        _state: ko.observable(),
+
+        STATES: STATE
     };
+
+    ret.state = ko.computed({
+        read: function() {
+            switch(this._state()) {
+                case STATE.Add:
+                    if(this.images.unused().length > 0)
+                        return this._state();
+                    else
+                        return STATE.None;
+                    break;
+
+                default:
+                    return this._state();
+            }
+        },
+        write: function(value) {
+            var oldState = this._state();
+            if(oldState === value)
+                return;
+
+            this._state(value);
+
+            if(value === STATE.Move) {
+                $("#tbl").find("tr > td > img").draggable({ snap: "#tbl td", snapMode: 'inner' });
+            } else if(oldState === STATE.Move) {
+                $("#tbl").find("tr > td > img").draggable("destroy");
+            }
+        },
+        owner: ret
+    });
 
     return ret;
 })(jQuery, ko);

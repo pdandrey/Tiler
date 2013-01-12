@@ -12,19 +12,22 @@
         #tbl { clear: both; border-collapse: collapse; }
         #tbl tr td { height: 32px; width: 32px; padding: 0; margin: 0; line-height: 0; }
         #tbl tr td:hover { background-color: rgba(173, 216, 230, 0.5); }
+        #tbl tr td:hover img { outline: 1px solid black; outline-offset: -5px; }
+        img.duplicate { outline: 1px solid red; outline-offset: -2px; }
     </style>
 </head>
 <body>
     <div id="toolbar" class="btn-group">
-        <button id="btnLoadImage" data-state="add" class="btn"><i class="icon-plus" data-bind="css: { active: unused().length > 0 }"></i></button>
-        <button class="btn" data-state="delete"><i class="icon-remove"></i></button>
+        <button id="btnLoadImage" data-state="Add" class="btn"><i class="icon-plus"></i></button>
+        <button class="btn" data-state="Delete"><i class="icon-remove"></i></button>
         <!--<button class="btn">Select</button>-->
-        <button class="btn" data-state="move"><i class="icon-move"></i></button>
-        <button class="btn" data-state="compare"><i class="icon-check"></i></button>
+        <button class="btn" data-state="Move"><i class="icon-move"></i></button>
+        <button class="btn" data-state="Compare"><i class="icon-check"></i></button>
+        <button id="btnSaveImage" class="btn" data-state="Save"><i class="icon-file"></i></button>
     </div>
 
     <div id="divSections">
-        <div id="divAdd" class="well" data-bind="allowBindings: false, visible: $data === 'add'">
+        <div id="divAdd" class="well" data-bind="allowBindings: false, visible: $data === Tiler.STATES.Add">
             <button class="close" onclick="Tiler.images.unused.splice(0, Tiler.images.unused().length); return false;">&times;</button>
             <input id="files" type="file" multiple style="display:none;"/>
 
@@ -51,22 +54,48 @@
             </div>
         </div>
 
-        <div id="divRemove" class="well" data-bind="visible: $data === 'delete'">
+        <div id="divRemove" class="well" data-bind="allowBindings: false, visible: $data === Tiler.STATES.Delete">
             <button class="close" onclick="">&times;</button>
             Select the images to delete:
-            <ul id="lstToDelete" data-bind="foreach: $context" class='inline'>
-                <li>hello<img data-bin="attr: { src: $('#' + $data + ' > img').attr('src') }"/></li>
+            <ul id="lstToDelete" data-bind="foreach: $data" class='inline'>
+                <li><img data-bind="attr: { src: $('#' + $data + ' > img').attr('src') }"/></li>
             </ul>
+            <button class="btn" onclick="deleteImages(); return false"><i class="icon-remove"></i>Delete</button>
         </div>
+
+        <div id="divMove" class="well" data-bind="allowBindings: false, visible: $data === Tiler.STATES.Move">
+            <button class="close" onclick="">&times;</button>
+            Drag and drop images to move.
+        </div>
+
+        <div id="divCompare" class="well" data-bind="allowBindings: false, visible: $data === Tiler.STATES.Compare">
+            <button class="close" onclick="">&times;</button>
+            Select the images to compare:
+            <ul id="lstToCompare" data-bind="foreach: $data" class='inline'>
+                <li><img data-bind="attr: { src: $data.src }"/></li>
+            </ul>
+            <div id="divCompareResults">
+                <span data-bind="visible: $data.length == 2 && $data[0].src === $data[1].src"><i class="icon-ok"></i>They are the same.</span>
+                <span data-bind="visible: $data.length == 2 && $data[0].src !== $data[1].src"><i class="icon-remove"></i>The images are Different.</span>
+            </div>
+
+            <button onclick="findDups(); return false;">Find Duplicates</button>
+        </div>
+
+        <div id="divSave" class="well" data-bind="allowBindings: false, visible: $data === Tiler.STATES.Save">
+            <button class="close" onclick="">&times;</button>
+            <img id="imgPreview"/>
+        </div>
+
     </div>
     <table id="tbl">
 
     </table>
 
-    <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.8.3/jquery.min.js"></script>
-    <!--script src="http://ajax.googleapis.com/ajax/libs/jqueryui/1.9.2/jquery-ui.min.js"></script-->
-    <script src="http://ajax.aspnetcdn.com/ajax/knockout/knockout-2.2.0.js"></script>
-    <script src="http://netdna.bootstrapcdn.com/twitter-bootstrap/2.2.2/js/bootstrap.min.js"></script>
+    <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.8.3/jquery.js"></script>
+    <script src="http://ajax.googleapis.com/ajax/libs/jqueryui/1.9.2/jquery-ui.js"></script>
+    <script src="http://ajax.aspnetcdn.com/ajax/knockout/knockout-2.2.0.debug.js"></script>
+    <script src="http://netdna.bootstrapcdn.com/twitter-bootstrap/2.2.2/js/bootstrap.js"></script>
     <script src="Tiler.js"></script>
 
     <script>
@@ -74,9 +103,14 @@
 
         var state = {
             selectedIndex: ko.observable(null),
-            selectedImage: null,
-            state: ko.observable(null)
+            selectedImage: null
         };
+
+        var imagesToCompare = ko.observableArray();
+        var duplicateImages = {
+            ids: ko.observableArray()
+        }
+
         state.selectedImage = ko.computed(function() {
                 if(this.selectedIndex() == null)
                     return null;
@@ -86,11 +120,11 @@
         $(function() {
            var files = $("#files").change(Tiler.filesSelected);
             var lst = $("#lstImages").click(unusedImageClicked);
-            $("#btnLoadImage").click(function() { state.state("add"); files.click(); });
+            $("#btnLoadImage").click(function() { Tiler.state(Tiler.STATES.Add); files.click(); });
             $("#toolbar").click(function(e) {
                 var btn = $(e.target);
                 var st = btn.data("state");
-                state.state(st);
+                Tiler.state(st);
             });
 
             var tbl = $("#tbl");
@@ -108,13 +142,79 @@
                 }
                 rows.push("<tr>" + curr.join("") + "</tr>");
             }
-            tbl.append(rows.join("")).click(cellClick);
+            tbl.append(rows.join("")).click(cellClick).find("tr > td").droppable({
+                drop: function(event, ui) {
+                    ui.draggable.appendTo($(this)).css({ top: 0, left: 0 });
+                }
+            });
 
             ko.applyBindings(Tiler, lst[0]);
-            ko.applyBindings(state.state, $("#divSections")[0]);
+            ko.applyBindings(Tiler.state, $("#divSections")[0]);
             ko.applyBindings(state.selectedImage, $("#divPreview")[0]);
             ko.applyBindings(Tiler.images.toDelete, $("#lstToDelete")[0]);
+            ko.applyBindings(imagesToCompare, $("#lstToCompare")[0]);
+            ko.applyBindings(imagesToCompare, $("#divCompareResults")[0]);
+            $("button.close").click(function() { Tiler.state(Tiler.STATES.None); return false; });
+            $("#btnSaveImage").click(save);
         });
+
+        function findDups() {
+            duplicateImages.ids.splice(0, duplicateImages.ids().length);
+            for(var key in duplicateImages) {
+                if(key !== "ids" && $.isArray(duplicateImages[key]))
+                    delete duplicateImages[key];
+            }
+            var images = $("#tbl img").removeClass("duplicate");
+            for(var i=0; i<images.length; ++i) {
+                var img = images.eq(i);
+                var src = img.attr("src");
+                var id = img.closest("td").attr("id");
+                if(!duplicateImages[src]) {
+                    duplicateImages[src] = [];
+                } else if(duplicateImages[src].length === 1) {
+                    duplicateImages.ids.push(src);
+                    $("#" + duplicateImages[src][0] + " > img").addClass("duplicate");
+                }
+                duplicateImages[src].push(id);
+                if(duplicateImages[src].length > 1)
+                    img.addClass("duplicate");
+            }
+
+            for(var key in duplicateImages) {
+                if(key !== "ids" && $.isArray(duplicateImages[key]) && duplicateImages[key].length < 2)
+                    delete duplicateImages[key];
+            }
+        }
+
+        function save() {
+            var images = $("#tbl img");
+            var x = 0;
+            var y = 0;
+            var w = 0;
+            var h = 0;
+            var img;
+            for(var i=0; i<images.length; ++i) {
+                img = images.eq(i);
+                var td = img.closest("td");
+                x = (td.data("x") - 1) * 32;
+                y = (td.data("y") - 1) * 32;
+                img.data({x: x, y: y });
+                w = Math.max(w, x + 32);
+                h = Math.max(h, y + 32);
+            }
+
+            var canvas = document.createElement("canvas");
+            canvas.width = w;
+            canvas.height = h;
+            var context = canvas.getContext("2d");
+
+            for(i=0; i<images.length; ++i) {
+                img = images.eq(i);
+                context.drawImage(img[0], img.data("x"), img.data("y"));
+            }
+
+            $("#imgPreview").attr("src", canvas.toDataURL());
+        }
 
         function unusedImageClicked(e) {
             var img = $(e.target);
@@ -145,8 +245,8 @@
 
         function cellClick(e) {
             var target = $(e.target).closest("td");
-            switch(state.state()) {
-                case 'add':
+            switch(Tiler.state()) {
+                case Tiler.STATES.Add:
                     if(target.children("img").length > 0) {
                         target.addClass("selected");
                     } else {
@@ -155,10 +255,33 @@
                     }
                     break;
 
-                case 'delete':
-                    Tiler.images.toDelete.push(target.attr("id"));
+                case Tiler.STATES.Delete:
+                    if(target.children("img").length > 0)
+                        Tiler.images.toDelete.push(target.attr("id"));
+                    break;
+
+                case Tiler.STATES.Compare:
+                    var id = target.attr("id");
+                    for(var i=0; i<imagesToCompare().length; ++i)
+                        if(imagesToCompare()[i].id === id)
+                            return;
+
+                    if(imagesToCompare().length == 2) {
+                        imagesToCompare.splice(0,1);
+                    }
+
+                    imagesToCompare.push({ src: target.children("img").attr("src"), id: id });
                     break;
             }
+        }
+
+        function deleteImages() {
+            for(var i=0; i<Tiler.images.toDelete().length; ++i) {
+                var id = Tiler.images.toDelete()[i];
+                $("#" + id).children("img").remove();
+            }
+            Tiler.images.toDelete.splice(0, Tiler.images.toDelete().length);
+            Tiler.state(Tiler.STATES.None);
         }
     </script>
 </body>
